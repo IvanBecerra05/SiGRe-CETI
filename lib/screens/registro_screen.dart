@@ -200,6 +200,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                       'Ver historial',
                     ),
                   ),
+                  const SizedBox(height: 50),
                 ],
               ),
             ),
