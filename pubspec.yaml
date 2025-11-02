@@ -18,6 +18,8 @@ dependencies:
   path_provider: ^2.1.5
   gal: ^2.3.2
   intl: ^0.20.2
+  google_fonts: ^6.3.0
+  http: ^1.1.0
 
 dev_dependencies:
   flutter_test:
@@ -35,3 +37,11 @@ flutter:
   
   assets:
     - assets/icon/logo.png
+  fonts:
+    - family: Domine 
+      fonts:
+        - asset: assets/fonts/Domine-Bold.ttf
+        - asset: assets/fonts/Domine-Medium.ttf
+        - asset: assets/fonts/Domine-Regular.ttf
+        - asset: assets/fonts/Domine-SemiBold.ttf
+          weight: 700

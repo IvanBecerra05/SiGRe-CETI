@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:sqflite/sqflite.dart';
 import '../database_helper.dart';
 import '../foto_service.dart';
@@ -39,14 +40,19 @@ class _RegistroScreenState extends State<RegistroScreen> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Nueva categoría'),
+        title: const Text(
+          'Nueva categoría',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: TextField(
-            controller: nombreCtrl,
-            decoration: const InputDecoration(labelText: 'Nombre')),
+          controller: nombreCtrl,
+          decoration: const InputDecoration(labelText: 'Nombre'),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
           TextButton(
             onPressed: () async {
               if (nombreCtrl.text.isNotEmpty) {
@@ -63,16 +69,23 @@ class _RegistroScreenState extends State<RegistroScreen> {
   }
 
   Future<void> _guardarRegistro() async {
-    if (categoriaSeleccionada == null || volumenCtrl.text.isEmpty) return;
+    if (categoriaSeleccionada == null || volumenCtrl.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Completa todos los campos'),
+            backgroundColor: Colors.red),
+      );
+      return;
+    }
 
     await db.insert('registros', {
-      'fecha': DateTime.now().toIso8601String(),
+      'fecha': DateTime.now().toLocal().toIso8601String(), // ✅ Hora local
       'categoria_id': categoriaSeleccionada,
       'volumen': double.tryParse(volumenCtrl.text) ?? 0,
       'foto_path': fotoPath
     });
-
     setState(() {
+      categoriaSeleccionada = null; // ✅ Reinicia el dropdown
       volumenCtrl.clear();
       fotoPath = null;
     });
@@ -91,56 +104,102 @@ class _RegistroScreenState extends State<RegistroScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Registro de basura'),
+        title: Text('Registro de basura'),
         actions: [
-          IconButton(onPressed: _agregarCategoria, icon: const Icon(Icons.add)),
+          TextButton.icon(
+            onPressed: _agregarCategoria,
+            icon: Icon(Icons.add, color: Colors.grey[800]),
+            label: Text(
+              'Categoría',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[800],
+                fontSize: 13,
+              ),
+            ),
+          ),
         ],
       ),
       body: categorias.isEmpty
-          ? const Center(child: Text('Agrega una categoría para comenzar'))
+          ? const Center(
+              child: Text(
+                'Agrega una categoría para comenzar',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            )
           : Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(labelText: 'Categoría'),
-                    value: categoriaSeleccionada,
-                    items: categorias.map((c) {
-                      return DropdownMenuItem<int>(
-                        value: c['id'] as int,
-                        child: Text(c['nombre']),
-                      );
-                    }).toList(),
-                    onChanged: (v) => setState(() => categoriaSeleccionada = v),
+                  // 🔹 Parte superior con scroll si crece
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          DropdownButtonFormField<int>(
+                            decoration:
+                                const InputDecoration(labelText: 'Categoría'),
+                            value: categoriaSeleccionada,
+                            items: categorias.map((c) {
+                              return DropdownMenuItem<int>(
+                                value: c['id'] as int,
+                                child: Text(
+                                  c['nombre'],
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (v) =>
+                                setState(() => categoriaSeleccionada = v),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: volumenCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Volumen (m³)',
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                          const SizedBox(height: 20),
+                          fotoPath == null
+                              ? const Text(
+                                  'Sin foto seleccionada',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                )
+                              : Image.file(File(fotoPath!), height: 200),
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            onPressed: _tomarFoto,
+                            icon: const Icon(Icons.camera_alt),
+                            label: const Text(
+                              'Tomar foto',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  TextField(
-                    controller: volumenCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Volumen (Mt3)'),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 20),
-                  fotoPath == null
-                      ? const Text('Sin foto seleccionada')
-                      : Image.file(File(fotoPath!), height: 200),
+
+                  // 🔹 Botones fijos al fondo
                   const SizedBox(height: 20),
                   ElevatedButton.icon(
-                    onPressed: _tomarFoto,
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Tomar foto'),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
                     onPressed: _guardarRegistro,
-                    child: const Text('Guardar registro'),
+                    icon: const Icon(Icons.save),
+                    label: const Text(
+                      'Guardar registro',
+                    ),
                   ),
                   const SizedBox(height: 20),
-                  ElevatedButton(
+                  ElevatedButton.icon(
                     onPressed: () {
                       Navigator.pushNamed(context, '/historial');
                     },
-                    child: const Text('Ver historial'),
-                  )
+                    icon: const Icon(Icons.history),
+                    label: const Text(
+                      'Ver historial',
+                    ),
+                  ),
                 ],
               ),
             ),
