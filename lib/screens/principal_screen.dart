@@ -114,9 +114,9 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                icon: const Icon(Icons.settings),
-                label: const Text('Configuración'),
-                onPressed: () => Navigator.pushNamed(context, '/configuracion'),
+                icon: const Icon(Icons.category),
+                label: const Text('Categorías'),
+                onPressed: () => Navigator.pushNamed(context, '/categorias'),
               ),
               const SizedBox(height: 32),
 
@@ -130,7 +130,6 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                     vertical: 12,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
@@ -216,7 +215,7 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                       Column(
                         children: [
                           Text(
-                            '${_totalSemanal.toStringAsFixed(2)} m³',
+                            '${_totalSemanal.toStringAsFixed(2)} mt³',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -241,7 +240,7 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                                     ),
                                   ),
                                   Text(
-                                    '${entry.value.toStringAsFixed(2)} m³',
+                                    '${entry.value.toStringAsFixed(2)} mt³',
                                     style: TextStyle(
                                       color: Colors.grey[800],
                                       fontWeight: FontWeight.bold,
