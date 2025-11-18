@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
-import '../database_helper.dart';
+
+import '../services/database_helper.dart';
+import '../services/sync_service.dart';
+import '../services/firebase_service.dart';
 import '../weather_service.dart';
 
 class PrincipalScreen extends StatefulWidget {
@@ -15,7 +18,6 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
   Map<String, double> residuosSemana = {};
   bool isLoading = true;
 
-  // Datos del clima
   double? temperatura;
   String? calidadAire;
   Color? colorAQI;
@@ -30,12 +32,19 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
 
   Future<void> _initDB() async {
     db = await DatabaseHelper.openDB();
+
+    // 🔼 Subir pendientes
+    await SyncService.sincronizar();
+
+    // 🔽 Traer categorías globales a la BD local
+    await SyncService.sincronizarCategoriasDesdeNube();
+
+    // Resumen semanal (Firebase primero, luego local)
     await _cargarResumenSemanal();
   }
 
   Future<void> _cargarDatosAmbientales() async {
     setState(() => cargandoClima = true);
-
     final datos = await WeatherService.obtenerDatosAmbientales();
 
     if (datos != null) {
@@ -57,6 +66,23 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
     final inicioSemana = DateTime(hoy.year, hoy.month, hoy.day)
         .subtract(const Duration(days: 7));
 
+    // 1️⃣ Intentar obtener el resumen global desde Firebase
+    try {
+      final resumenFirebase =
+          await FirebaseService.obtenerResumenSemanal(inicioSemana);
+
+      if (resumenFirebase.isNotEmpty) {
+        setState(() {
+          residuosSemana = resumenFirebase;
+          isLoading = false;
+        });
+        return; // usamos el resumen global
+      }
+    } catch (e) {
+      debugPrint('Error obteniendo resumen semanal de Firebase: $e');
+    }
+
+    // 2️⃣ Fallback: usar SQLite local (solo datos de este dispositivo)
     final res = await db.rawQuery('''
       SELECT 
         c.nombre as categoria,
@@ -70,7 +96,8 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
 
     setState(() {
       residuosSemana = {
-        for (var row in res) row['categoria'] as String: row['total'] as double
+        for (var row in res)
+          row['categoria'] as String: (row['total'] as num?)?.toDouble() ?? 0.0,
       };
       isLoading = false;
     });
@@ -94,13 +121,15 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
             children: [
               Icon(Icons.eco, size: 100, color: Colors.green[700]),
               const SizedBox(height: 16),
-              const Text('SiGRe CETI',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-              const Text('Sistema de Gestión de Residuos CETI',
-                  style: TextStyle(fontSize: 16, color: Colors.grey)),
+              const Text(
+                'SiGRe CETI',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              ),
+              const Text(
+                'Sistema de Gestión de Residuos CETI',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
               const SizedBox(height: 32),
-
-              // Botones
               ElevatedButton.icon(
                 icon: const Icon(Icons.add_circle),
                 label: const Text('Registrar residuo'),
@@ -119,8 +148,6 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                 onPressed: () => Navigator.pushNamed(context, '/categorias'),
               ),
               const SizedBox(height: 32),
-
-              // Datos ambientales (clima real)
               if (cargandoClima)
                 const CircularProgressIndicator()
               else if (temperatura != null && calidadAire != null)
@@ -135,7 +162,6 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Temperatura
                       Icon(Icons.thermostat, color: Colors.orange[700]),
                       const SizedBox(width: 4),
                       Text(
@@ -146,20 +172,12 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                         ),
                       ),
                       const SizedBox(width: 16),
-
-                      // Separador
-                      Container(
-                        height: 20,
-                        width: 1,
-                        color: Colors.grey[400],
-                      ),
+                      Container(height: 20, width: 1, color: Colors.grey[400]),
                       const SizedBox(width: 16),
-
-                      // Calidad del aire
                       Icon(Icons.air, color: colorAQI),
                       const SizedBox(width: 4),
                       Text(
-                        calidadAire!,
+                        calidadAire ?? '',
                         style: TextStyle(
                           color: colorAQI,
                           fontWeight: FontWeight.bold,
@@ -173,10 +191,6 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                   'No se pudo obtener el clima',
                   style: TextStyle(color: Colors.grey[600]),
                 ),
-
-              const SizedBox(height: 24),
-
-              // Resumen semanal
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 24),
                 padding: const EdgeInsets.all(16),
@@ -215,7 +229,7 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                       Column(
                         children: [
                           Text(
-                            '${_totalSemanal.toStringAsFixed(2)} mt³',
+                            '${_totalSemanal.toStringAsFixed(2)}',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
@@ -240,7 +254,7 @@ class _PrincipalScreenState extends State<PrincipalScreen> {
                                     ),
                                   ),
                                   Text(
-                                    '${entry.value.toStringAsFixed(2)} mt³',
+                                    entry.value.toStringAsFixed(2),
                                     style: TextStyle(
                                       color: Colors.grey[800],
                                       fontWeight: FontWeight.bold,

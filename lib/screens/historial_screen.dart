@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
-import '../database_helper.dart';
-import 'dart:io';
 import 'package:intl/intl.dart';
+
+import '../services/database_helper.dart';
+import '../services/sync_service.dart';
+import '../services/firebase_service.dart';
 
 class HistorialScreen extends StatefulWidget {
   const HistorialScreen({super.key});
@@ -15,8 +19,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
   late Database db;
   List<Map<String, dynamic>> registros = [];
   bool isLoading = true;
-
-  DateTime fechaActual = DateTime.now(); // Fecha visible y filtrada
+  DateTime fechaActual = DateTime.now();
 
   @override
   void initState() {
@@ -27,32 +30,48 @@ class _HistorialScreenState extends State<HistorialScreen> {
   Future<void> _initDB() async {
     db = await DatabaseHelper.openDB();
     await _cargarRegistros();
+    // Sincronizar registros pendientes HACIA la nube
+    await SyncService.sincronizar();
   }
 
   Future<void> _cargarRegistros() async {
     setState(() => isLoading = true);
 
-    // Normalizamos fecha a medianoche para comparar solo el día
+    // 1) Intentar primero desde Firebase (historial global)
+    try {
+      final registrosFirebase =
+          await FirebaseService.obtenerRegistrosPorDia(fechaActual);
+
+      if (registrosFirebase.isNotEmpty) {
+        setState(() {
+          registros = registrosFirebase;
+          isLoading = false;
+        });
+        return; // usamos los de Firebase y listo
+      }
+    } catch (e) {
+      // Si falla Firebase, caemos al local
+      debugPrint('Error obteniendo registros de Firebase: $e');
+    }
+
+    // 2) Fallback: cargar solo los registros locales de este dispositivo
     final inicioDia =
         DateTime(fechaActual.year, fechaActual.month, fechaActual.day);
     final finDia = inicioDia.add(const Duration(days: 1));
-
-    // Query con filtro por fecha - comparando strings directamente
-    final inicioStr = inicioDia.toIso8601String();
-    final finStr = finDia.toIso8601String();
 
     final res = await db.rawQuery('''
       SELECT 
         r.id,
         r.fecha,
         r.volumen,
+        r.unidad,
         r.foto_path,
         c.nombre as categoria_nombre
       FROM registros r
       INNER JOIN categorias c ON r.categoria_id = c.id
       WHERE r.fecha >= ? AND r.fecha < ?
       ORDER BY r.fecha DESC
-    ''', [inicioStr, finStr]);
+    ''', [inicioDia.toIso8601String(), finDia.toIso8601String()]);
 
     setState(() {
       registros = res;
@@ -65,7 +84,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Confirmar'),
-        content: const Text('¿Eliminar este registro?'),
+        content: const Text('¿Eliminar este registro LOCAL? (No borra en la nube)'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -84,7 +103,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
       await _cargarRegistros();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registro eliminado')),
+          const SnackBar(content: Text('Registro eliminado localmente')),
         );
       }
     }
@@ -94,19 +113,18 @@ class _HistorialScreenState extends State<HistorialScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(registro['categoria_nombre']),
+        title: Text(registro['categoria_nombre'] ?? ''),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Fecha: ${_formatearFecha(registro['fecha'])}'),
               const SizedBox(height: 8),
-              Text('Volumen: ${registro['volumen']} Mt3'),
+              Text(
+                'Cantidad: ${registro['volumen']} ${registro['unidad'] ?? ''}',
+              ),
               const SizedBox(height: 16),
-              if (registro['foto_path'] != null)
-                Image.file(File(registro['foto_path']), fit: BoxFit.contain)
-              else
-                const Text('Sin foto'),
+              _construirImagenDetalle(registro),
             ],
           ),
         ),
@@ -120,6 +138,25 @@ class _HistorialScreenState extends State<HistorialScreen> {
     );
   }
 
+  Widget _construirImagenDetalle(Map<String, dynamic> registro) {
+    final fotoPath = registro['foto_path'] as String?;
+    final fotoUrl = registro['foto_url'] as String?;
+
+    if (fotoPath != null && fotoPath.isNotEmpty) {
+      return Image.file(
+        File(fotoPath),
+        fit: BoxFit.contain,
+      );
+    } else if (fotoUrl != null && fotoUrl.isNotEmpty) {
+      return Image.network(
+        fotoUrl,
+        fit: BoxFit.contain,
+      );
+    } else {
+      return const Text('Sin foto');
+    }
+  }
+
   String _formatearFecha(String fecha) {
     final dt = DateTime.parse(fecha);
     return DateFormat('dd/MM/yyyy HH:mm').format(dt);
@@ -127,12 +164,12 @@ class _HistorialScreenState extends State<HistorialScreen> {
 
   String _formatearDiaSuperior() {
     final hoy = DateTime.now();
-    final esHoy = fechaActual.year == hoy.year &&
+    if (fechaActual.year == hoy.year &&
         fechaActual.month == hoy.month &&
-        fechaActual.day == hoy.day;
-
-    if (esHoy) return 'HOY';
-    return DateFormat('dd MMMM yyyy', 'es_MX').format(fechaActual);
+        fechaActual.day == hoy.day) {
+      return 'HOY';
+    }
+    return DateFormat('dd MMMM yyyy').format(fechaActual);
   }
 
   void _cambiarDia(int dias) {
@@ -149,7 +186,6 @@ class _HistorialScreenState extends State<HistorialScreen> {
       initialDate: fechaActual.isAfter(hoy) ? hoy : fechaActual,
       firstDate: DateTime(2020),
       lastDate: hoy,
-      // Sin locale - se usa inglés por defecto
     );
 
     if (seleccionada != null) {
@@ -181,19 +217,15 @@ class _HistorialScreenState extends State<HistorialScreen> {
       ),
       body: Column(
         children: [
-          // 🔼 Encabezado de fecha y flechas
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Flecha izquierda (día anterior)
                 IconButton(
                   icon: const Icon(Icons.chevron_left, size: 32),
                   onPressed: () => _cambiarDia(-1),
                 ),
-
-                // Texto de fecha / HOY
                 GestureDetector(
                   onTap: _seleccionarFecha,
                   child: Text(
@@ -204,10 +236,8 @@ class _HistorialScreenState extends State<HistorialScreen> {
                     ),
                   ),
                 ),
-
-                // Flecha derecha (solo aparece si NO es hoy)
                 esHoy
-                    ? const SizedBox(width: 48) // espacio vacío para alinear
+                    ? const SizedBox(width: 48)
                     : IconButton(
                         icon: const Icon(Icons.chevron_right, size: 32),
                         onPressed: () => _cambiarDia(1),
@@ -215,46 +245,70 @@ class _HistorialScreenState extends State<HistorialScreen> {
               ],
             ),
           ),
-
-          // 🔽 Lista de registros
           Expanded(
             child: isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : registros.isEmpty
                     ? const Center(
-                        child: Text('No hay registros para este día'))
+                        child: Text('No hay registros para este día'),
+                      )
                     : ListView.builder(
                         itemCount: registros.length,
                         itemBuilder: (context, index) {
                           final reg = registros[index];
+                          final fotoPath = reg['foto_path'] as String?;
+                          final fotoUrl = reg['foto_url'] as String?;
+                          final tieneFotoLocal =
+                              fotoPath != null && fotoPath.isNotEmpty;
+                          final tieneFotoRemota =
+                              fotoUrl != null && fotoUrl.isNotEmpty;
+
+                          Widget leading;
+                          if (tieneFotoLocal) {
+                            leading = ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(
+                                File(fotoPath!),
+                                width: 50,
+                                height: 50,
+                                fit: BoxFit.cover,
+                              ),
+                            );
+                          } else if (tieneFotoRemota) {
+                            leading = ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                fotoUrl!,
+                                width: 50,
+                                height: 50,
+                                fit: BoxFit.cover,
+                              ),
+                            );
+                          } else {
+                            leading = const Icon(Icons.delete, size: 40);
+                          }
+
                           return Card(
                             margin: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 4),
                             child: ListTile(
-                              leading: reg['foto_path'] != null
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.file(
-                                        File(reg['foto_path']),
-                                        width: 50,
-                                        height: 50,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    )
-                                  : const Icon(Icons.delete, size: 40),
+                              leading: leading,
                               title: Text(
-                                reg['categoria_nombre'],
+                                reg['categoria_nombre'] ?? '',
                                 style: const TextStyle(
                                     fontWeight: FontWeight.bold),
                               ),
                               subtitle: Text(
-                                '${reg['volumen']} Mt3 - ${_formatearFecha(reg['fecha'])}',
+                                '${reg['volumen']} ${reg['unidad'] ?? ''} - ${_formatearFecha(reg['fecha'])}',
                               ),
-                              trailing: IconButton(
-                                icon:
-                                    const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () => _eliminarRegistro(reg['id']),
-                              ),
+                              trailing: reg['id'] is int
+                                  ? IconButton(
+                                      icon: const Icon(Icons.delete,
+                                          color: Colors.red),
+                                      onPressed: () =>
+                                          _eliminarRegistro(reg['id'] as int),
+                                    )
+                                  : null, // los de Firebase no se borran localmente
                               onTap: () => _verDetalles(reg),
                             ),
                           );

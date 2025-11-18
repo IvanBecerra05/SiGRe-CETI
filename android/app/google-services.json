@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "262730352378",
+    "project_id": "sigre-ceti",
+    "storage_bucket": "sigre-ceti.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:262730352378:android:47cee5cffce6d5432a2b43",
+        "android_client_info": {
+          "package_name": "com.example.sigre_ceti"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD_oKYcgIUT_ddFGXcPKY7cweDyCw15uB4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
